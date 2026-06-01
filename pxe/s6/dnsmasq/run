@@ -1,0 +1,2 @@
+#!/bin/bash
+exec dnsmasq --no-daemon -C /etc/dnsmasq.d/pxe.conf

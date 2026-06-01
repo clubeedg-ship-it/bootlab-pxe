@@ -1,0 +1,97 @@
+@echo off
+cls
+
+echo [1/4] Initializing network...
+wpeinit
+
+echo [2/4] Waiting for server...
+:waitnet
+ping -n 1 ${PXE_SERVER} >nul 2>&1
+if errorlevel 1 (
+    echo   Retrying...
+    ping -n 3 127.0.0.1 >nul 2>&1
+    goto waitnet
+)
+echo   Network OK.
+echo.
+
+REM Gather hardware identity (replaces iPXE SMBIOS on the Microsoft-signed path)
+for /f "tokens=2 delims==" %%a in ('wmic nic where "NetEnabled=true" get MACAddress /value 2^>nul ^| findstr /r "."') do set MAC=%%a
+set MAC=%MAC: =%
+for /f "tokens=2 delims==" %%a in ('wmic baseboard get Manufacturer /value 2^>nul ^| findstr /r "."') do set MFR=%%a
+set MFR=%MFR: =%
+for /f "tokens=2 delims==" %%a in ('wmic baseboard get Product /value 2^>nul ^| findstr /r "."') do set PRODUCT=%%a
+set PRODUCT=%PRODUCT: =%
+for /f "tokens=2 delims==" %%a in ('wmic bios get SerialNumber /value 2^>nul ^| findstr /r "."') do set SERIAL=%%a
+set SERIAL=%SERIAL: =%
+
+REM Normalize MAC for URL (replace : with -)
+set URLMAC=%MAC::=-%
+
+REM Report WinPE booted
+powershell -Command "try { Invoke-WebRequest -Uri 'http://${PXE_SERVER}:${PXE_HTTP_PORT}/api/v1/machines/%URLMAC%/stage' -Method POST -Body ('{\"stage\":\"winpe_booted\",\"manufacturer\":\"' + '%MFR%' + '\",\"product\":\"' + '%PRODUCT%' + '\",\"serial\":\"' + '%SERIAL%' + '\"}') -ContentType 'application/json' -UseBasicParsing -TimeoutSec 5 } catch {}" >nul 2>&1
+
+echo =======================================
+echo   bootlab-pxe
+echo   Windows 11 Pro Setup
+echo =======================================
+echo   Machine: %MFR% %PRODUCT%
+echo   Serial:  %SERIAL%
+echo   MAC:     %MAC%
+echo =======================================
+echo.
+echo   [1] Nederlands  (nl-NL)
+echo   [2] Francais    (fr-FR)
+echo   [3] Deutsch     (de-DE)
+echo   [4] Italiano    (it-IT)
+echo   [5] English     (en-US)
+echo.
+echo =======================================
+echo.
+set /p CHOICE=Select language (1-5):
+
+if "%CHOICE%"=="1" set LANG=nl-NL
+if "%CHOICE%"=="2" set LANG=fr-FR
+if "%CHOICE%"=="3" set LANG=de-DE
+if "%CHOICE%"=="4" set LANG=it-IT
+if "%CHOICE%"=="5" set LANG=en-US
+if not defined LANG set LANG=nl-NL
+
+echo.
+echo Selected: %LANG%
+echo.
+
+REM Report language selection
+powershell -Command "try { Invoke-WebRequest -Uri 'http://${PXE_SERVER}:${PXE_HTTP_PORT}/api/v1/machines/%URLMAC%/stage' -Method POST -Body ('{\"stage\":\"language_selected\",\"lang\":\"' + '%LANG%' + '\"}') -ContentType 'application/json' -UseBasicParsing -TimeoutSec 5 } catch {}" >nul 2>&1
+
+echo [3/4] Mapping install source...
+
+REM Try language-specific install source first, fall back to default
+net use Z: \\${PXE_SERVER}\win11 /user:guest "" >nul 2>&1
+if not exist Z:\sources\install.wim (
+    echo ERROR: Could not access install source at \\${PXE_SERVER}\win11
+    echo Make sure the ISO has been extracted via setup-iso.sh
+    pause
+    goto :eof
+)
+
+echo [4/4] Starting Windows Setup...
+
+REM Download dynamic autounattend.xml from API
+mkdir C:\PXE 2>nul
+powershell -Command "Invoke-WebRequest -Uri 'http://${PXE_SERVER}:${PXE_HTTP_PORT}/api/v1/machines/%URLMAC%/autounattend.xml?lang=%LANG%' -OutFile 'C:\PXE\autounattend.xml' -UseBasicParsing -TimeoutSec 30"
+
+REM Report setup starting
+powershell -Command "try { Invoke-WebRequest -Uri 'http://${PXE_SERVER}:${PXE_HTTP_PORT}/api/v1/machines/%URLMAC%/stage' -Method POST -Body '{\"stage\":\"setup_started\"}' -ContentType 'application/json' -UseBasicParsing -TimeoutSec 5 } catch {}" >nul 2>&1
+
+echo.
+echo   Edition:  Windows 11 Pro
+echo   Language: %LANG%
+echo   Mode:     Unattended
+echo.
+
+Z:\setup.exe /unattend:C:\PXE\autounattend.xml /noreboot
+
+echo.
+echo Setup completed. Rebooting...
+wpeutil reboot

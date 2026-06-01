@@ -1,0 +1,22 @@
+interface=${LAN_INTERFACE}
+dhcp-range=${LAN_NETWORK},proxy
+enable-tftp
+tftp-root=/generated/tftp
+
+dhcp-match=set:efi-x86_64,option:client-arch,7
+dhcp-match=set:efi-x86_64,option:client-arch,9
+dhcp-match=set:bios,option:client-arch,0
+dhcp-match=set:ipxe,175
+
+# PRIMARY: UEFI clients get Microsoft-signed bootloader (Secure Boot OK)
+dhcp-boot=tag:efi-x86_64,tag:!ipxe,bootx64.efi
+
+# SECONDARY: iPXE clients get the dynamic boot script
+dhcp-boot=tag:ipxe,http://${PXE_SERVER}:${PXE_HTTP_PORT}/boot.ipxe
+
+# LEGACY: BIOS clients get iPXE
+dhcp-boot=tag:bios,tag:!ipxe,undionly.kpxe
+
+port=0
+log-facility=/var/log/dnsmasq-pxe.log
+log-dhcp

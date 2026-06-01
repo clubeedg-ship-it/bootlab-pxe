@@ -1,0 +1,17 @@
+[global]
+    workgroup = WORKGROUP
+    security = user
+    map to guest = bad user
+    server string = bootlab-pxe
+
+[win11]
+    path = /generated/win11/
+    guest ok = yes
+    read only = yes
+    browseable = yes
+
+[bootlab]
+    path = /generated/
+    guest ok = yes
+    read only = yes
+    browseable = yes

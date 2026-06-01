@@ -1,0 +1,160 @@
+#!/bin/sh
+# Hardware inventory script — runs at Alpine boot, gathers components,
+# POSTs to the panel, then reboots.
+set -e
+
+LOGFILE=/var/log/inventory.log
+exec >>"$LOGFILE" 2>&1
+echo "=== inventory.start $(date) ==="
+
+# Parse kernel cmdline for our params
+MAC=$(grep -oE 'BLUETEAM_MAC=[^ ]+' /proc/cmdline | cut -d= -f2 | tr 'A-F' 'a-f' | tr -d '-' | sed 's/../&:/g;s/:$//')
+API=$(grep -oE 'BLUETEAM_API=[^ ]+' /proc/cmdline | cut -d= -f2)
+
+if [ -z "$MAC" ] || [ -z "$API" ]; then
+    echo "Missing BLUETEAM_MAC or BLUETEAM_API in cmdline. Cmdline:"
+    cat /proc/cmdline
+    exit 1
+fi
+echo "MAC=$MAC  API=$API"
+
+# Install tools we need
+apk update
+apk add --no-cache dmidecode pciutils lshw curl jq util-linux
+
+# Wait for network (DHCP should already be set, but be safe)
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if ping -c1 -W1 "$(echo "$API" | sed 's|http://||;s|:.*||')" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+# --- Collect CPU ---
+CPU_MODEL=$(lscpu | awk -F': *' '/^Model name/ {print $2; exit}')
+CPU_CORES=$(lscpu | awk -F': *' '/^Core\(s\) per socket/ {print $2; exit}')
+CPU_SOCKETS=$(lscpu | awk -F': *' '/^Socket\(s\)/ {print $2; exit}')
+CPU_THREADS=$(lscpu | awk -F': *' '/^CPU\(s\):/ {print $2; exit}')
+CPU_CORES=$((CPU_CORES * CPU_SOCKETS))
+
+# --- Collect GPU (discrete preferred over integrated) ---
+GPU_LINE=$(lspci -nn | grep -iE '\[03(00|01|02)\]' | grep -viE 'integrated|microsoft|aspeed|matrox' | head -1)
+if [ -z "$GPU_LINE" ]; then
+    # Fallback to any display device
+    GPU_LINE=$(lspci -nn | grep -iE '\[03(00|01|02)\]' | head -1)
+fi
+GPU_MODEL=$(echo "$GPU_LINE" | sed -E 's/^[^ ]+ [^:]+: //; s/ *\(rev[^)]*\)$//; s/\[[a-f0-9:]+\]$//')
+
+# GPU VRAM via lshw (best effort)
+GPU_VRAM_MB=$(lshw -class display -json 2>/dev/null | jq -r '.[0].configuration.driver_version // empty' 2>/dev/null || echo "")
+# Try parsing size from lshw output
+GPU_VRAM_MB=$(lshw -class display 2>/dev/null | grep -oE 'size: [0-9]+(MiB|GiB)' | head -1 | awk '{
+    n=$2; sub(/(MiB|GiB)/,"",n)
+    if ($2 ~ /GiB/) print n*1024; else print n
+}')
+
+# --- Collect RAM ---
+RAM_MODULES=$(dmidecode -t memory 2>/dev/null | awk '
+    BEGIN { mod="" }
+    /^Memory Device/ { in_mod=1; size=""; type=""; speed=""; vendor=""; next }
+    /^$/ && in_mod {
+        if (size != "" && size != "No Module Installed" && size != "Not Specified") {
+            if (mod != "") mod = mod ","
+            mod = mod "{\"size\":\"" size "\",\"type\":\"" type "\",\"speed\":\"" speed "\",\"vendor\":\"" vendor "\"}"
+        }
+        in_mod=0
+    }
+    in_mod && /Size:/ { sub(/^[ \t]+Size: */, ""); size=$0 }
+    in_mod && /Type:/ && !/Detail/ && !/Form/ { sub(/^[ \t]+Type: */, ""); type=$0 }
+    in_mod && /Speed:/ && !/Configured/ { sub(/^[ \t]+Speed: */, ""); speed=$0 }
+    in_mod && /Manufacturer:/ { sub(/^[ \t]+Manufacturer: */, ""); vendor=$0 }
+    END { print "[" mod "]" }
+' 2>/dev/null)
+
+# Sum RAM total
+RAM_GB=$(dmidecode -t memory 2>/dev/null | awk '
+    /^Memory Device/ { in_mod=1; next }
+    in_mod && /Size:/ && !/No Module/ && !/Not Specified/ {
+        sub(/^[ \t]+Size: */, "")
+        if (match($0, /([0-9]+) GB/, m)) total += m[1]
+        else if (match($0, /([0-9]+) MB/, m)) total += m[1] / 1024
+        in_mod=0
+    }
+    END { print int(total) }
+')
+
+# --- Collect storage ---
+STORAGE=$(lsblk -Jbo NAME,SIZE,MODEL,VENDOR,TYPE,TRAN 2>/dev/null | jq -c '
+    [.blockdevices[]
+     | select(.type == "disk")
+     | select((.tran // "") != "usb")
+     | {model: (.model // "" | gsub("^ +| +$"; "")),
+        vendor: (.vendor // "" | gsub("^ +| +$"; "")),
+        size_gb: ((.size | tonumber) / 1073741824 | floor),
+        tran: (.tran // "unknown")}]
+')
+
+STORAGE_TOTAL=$(echo "$STORAGE" | jq '[.[] | .size_gb] | add // 0')
+
+# --- Refresh SMBIOS (in case iPXE missed any) ---
+MFR=$(dmidecode -s system-manufacturer 2>/dev/null | head -1)
+PRODUCT=$(dmidecode -s system-product-name 2>/dev/null | head -1)
+SERIAL=$(dmidecode -s system-serial-number 2>/dev/null | head -1)
+UUID=$(dmidecode -s system-uuid 2>/dev/null | head -1)
+BIOS_VENDOR=$(dmidecode -s bios-vendor 2>/dev/null | head -1)
+
+# --- POST to panel ---
+PAYLOAD=$(jq -nc \
+    --arg cpu "$CPU_MODEL" \
+    --argjson cpu_cores "${CPU_CORES:-0}" \
+    --argjson cpu_threads "${CPU_THREADS:-0}" \
+    --arg gpu "$GPU_MODEL" \
+    --argjson gpu_vram "${GPU_VRAM_MB:-0}" \
+    --argjson ram_gb "${RAM_GB:-0}" \
+    --argjson ram_modules "$RAM_MODULES" \
+    --argjson storage_total "$STORAGE_TOTAL" \
+    --argjson storage "$STORAGE" \
+    --arg mfr "$MFR" \
+    --arg product "$PRODUCT" \
+    --arg serial "$SERIAL" \
+    --arg uuid "$UUID" \
+    --arg bios "$BIOS_VENDOR" \
+    '{
+        cpu_model: $cpu,
+        cpu_cores: $cpu_cores,
+        cpu_threads: $cpu_threads,
+        gpu_model: $gpu,
+        gpu_vram_mb: $gpu_vram,
+        ram_gb: $ram_gb,
+        ram_modules: $ram_modules,
+        storage_total_gb: $storage_total,
+        storage_devices: $storage,
+        manufacturer: $mfr,
+        product: $product,
+        serial: $serial,
+        system_uuid: $uuid,
+        bios_vendor: $bios
+    } | with_entries(select(.value != null and .value != "" and .value != 0))')
+
+echo "Payload:"
+echo "$PAYLOAD" | jq .
+
+echo "Posting to ${API}/api/v1/machines/${MAC}/fingerprint ..."
+curl -sS -X POST "${API}/api/v1/machines/${MAC}/fingerprint" \
+    -H "Content-Type: application/json" \
+    -d "$PAYLOAD" || echo "POST failed"
+
+# Show summary on console
+clear
+echo "================================================="
+echo "  HARDWARE INVENTORY COMPLETE"
+echo "================================================="
+echo "  CPU:     $CPU_MODEL  ($CPU_CORES cores / $CPU_THREADS threads)"
+echo "  GPU:     $GPU_MODEL"
+echo "  RAM:     ${RAM_GB} GB"
+echo "  Storage: ${STORAGE_TOTAL} GB"
+echo "================================================="
+echo
+echo "Rebooting in 15 seconds..."
+sleep 15
+reboot -f

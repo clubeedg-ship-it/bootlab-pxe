@@ -1,0 +1,10 @@
+#!ipxe
+set pxe-server ${PXE_SERVER}
+set http-root http://${PXE_SERVER}:${PXE_HTTP_PORT}
+
+chain ${http-root}/api/v1/boot/${mac:hexhyp}.ipxe?manufacturer=${manufacturer:uristring}&product=${product:uristring}&serial=${serial:uristring}&uuid=${uuid:uristring} || goto error
+
+:error
+echo ERROR: control plane unreachable
+sleep 5
+sanboot --no-describe --drive 0x80 || exit

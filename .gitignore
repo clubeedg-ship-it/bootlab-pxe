@@ -1,0 +1,31 @@
+# Environment
+.env
+
+# Data (user-provided, too large for git)
+data/iso/
+data/drivers/
+data/activation/
+data/branding/
+data/redist/
+data/profiles/alpine/*.lts
+data/profiles/alpine/modloop-lts
+data/profiles/inventory/inventory.apkovl.tar.gz
+
+# Generated at runtime
+data/generated/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node
+node_modules/
+.next/
+.pnpm-store/
+
+# Docker
+*.log
+
+# OS
+.DS_Store

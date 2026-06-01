@@ -1,0 +1,128 @@
+#Requires -RunAsAdministrator
+$ErrorActionPreference = "Continue"
+$PXE_SERVER = "{{ pxe_server }}"
+$PXE_BASE = "http://${PXE_SERVER}:{{ pxe_http_port }}"
+$WORK_DIR = "C:\PXE"
+$LOG_FILE = "$WORK_DIR\post-install.log"
+$MAC = "{{ mac }}"
+$LANG = "{{ lang }}"
+
+function Write-Log { param([string]$Message)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$ts - $Message" | Tee-Object -FilePath $LOG_FILE -Append
+}
+
+function Report-Stage { param([string]$Stage)
+    try {
+        $body = @{ stage = $Stage } | ConvertTo-Json
+        Invoke-WebRequest -Uri "$PXE_BASE/api/v1/machines/$MAC/stage" -Method POST -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 | Out-Null
+    } catch {}
+}
+
+function Download-File { param([string]$Url, [string]$Dest)
+    try { Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -TimeoutSec 300; return $true }
+    catch { Write-Log "Download failed: $Url -- $($_.Exception.Message)"; return $false }
+}
+
+New-Item -Path $WORK_DIR -ItemType Directory -Force | Out-Null
+Write-Log "=== Post-install started (lang=$LANG) ==="
+Report-Stage "post_install_started"
+
+# --- 1. Language + regional ---
+Write-Log "[1/6] Configuring language: $LANG"
+
+Set-WinSystemLocale $LANG
+Set-WinHomeLocation -GeoId {{ locale.geo_id }}
+Set-Culture $LANG
+Set-WinUILanguageOverride $LANG
+Set-TimeZone -Id "{{ locale.timezone }}"
+
+$langList = New-WinUserLanguageList $LANG
+$langList[0].InputMethodTips.Clear()
+$langList[0].InputMethodTips.Add("{{ locale.input_method }}")
+Set-WinUserLanguageList $langList -Force
+
+Report-Stage "locale_configured"
+Write-Log "  Done: $LANG / {{ locale.timezone }}"
+
+# --- 2. VC++ Runtimes ---
+Write-Log "[2/6] Installing VC++ runtimes..."
+foreach ($arch in @("x64", "x86")) {
+    $exe = "$WORK_DIR\VC_redist.$arch.exe"
+    if (Download-File "$PXE_BASE/redist/VC_redist.$arch.exe" $exe) {
+        $proc = Start-Process -FilePath $exe -ArgumentList "/install","/quiet","/norestart" -Wait -PassThru
+        Write-Log "  VC_redist.$arch exit: $($proc.ExitCode)"
+        Remove-Item $exe -Force -ErrorAction SilentlyContinue
+    }
+}
+Report-Stage "vcredist_installed"
+
+# --- 3. NVIDIA GPU driver ---
+Write-Log "[3/6] Checking for NVIDIA GPU..."
+$gpu = Get-WmiObject Win32_VideoController | Where-Object { $_.Name -match "NVIDIA" }
+
+if ($gpu) {
+    Write-Log "  NVIDIA GPU detected: $($gpu.Name)"
+    $driverExe = "$WORK_DIR\nvidia-driver.exe"
+    if (Download-File "$PXE_BASE/drivers/nvidia/nvidia-driver.exe" $driverExe) {
+        Write-Log "  Installing silently..."
+        $proc = Start-Process -FilePath $driverExe -ArgumentList "-s","-clean","-noreboot","-noeula" -Wait -PassThru
+        Write-Log "  NVIDIA exit: $($proc.ExitCode)"
+        Remove-Item $driverExe -Force -ErrorAction SilentlyContinue
+    }
+} else {
+    Write-Log "  No NVIDIA GPU detected."
+}
+Report-Stage "drivers_installed"
+
+# --- 4. Activation (MAS HWID) ---
+Write-Log "[4/6] Activating Windows..."
+$masScript = "$WORK_DIR\MAS_AIO.cmd"
+if (Download-File "$PXE_BASE/activation/MAS_AIO.cmd" $masScript) {
+    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c","`"$masScript`" /HWID /S" -Wait -PassThru -WindowStyle Hidden
+    Write-Log "  MAS exit: $($proc.ExitCode)"
+    Start-Sleep -Seconds 5
+    $status = cscript //nologo C:\Windows\System32\slmgr.vbs /xpr 2>&1 | Out-String
+    Write-Log "  Activation: $($status.Trim())"
+    Remove-Item $masScript -Force -ErrorAction SilentlyContinue
+}
+Report-Stage "activation_done"
+
+# --- 5. Branding + gaming optimizations ---
+Write-Log "[5/6] Applying optimizations..."
+
+$screensaverImg = "C:\Windows\Web\Wallpaper\screensaver-gaming.jpg"
+if (Download-File "$PXE_BASE/branding/screensaver-gaming.jpg" $screensaverImg) {
+    Add-Type -TypeDefinition @"
+using System.Runtime.InteropServices;
+public class Wallpaper {
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+"@
+    [Wallpaper]::SystemParametersInfo(20, 0, $screensaverImg, 3) | Out-Null
+}
+
+powercfg -h off
+powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+powercfg /change standby-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+
+New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" -Force | Out-Null
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" -Name "AllowGameDVR" -Value 0
+New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Force | Out-Null
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Name "AllowCortana" -Value 0
+New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Force | Out-Null
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "AllowTelemetry" -Value 0
+
+Report-Stage "optimizations_applied"
+
+# --- 6. Cleanup ---
+Write-Log "[6/6] Cleaning up..."
+Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "DefaultPassword" -ErrorAction SilentlyContinue
+
+Write-Log "=== Post-install completed ==="
+Report-Stage "complete"
+
+shutdown /r /t 30 /c "bootlab-pxe: setup complete. Rebooting..."

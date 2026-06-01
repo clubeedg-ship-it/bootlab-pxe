@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bootlab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: bootlab
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bootlab"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      BT_DATABASE_URL: postgresql+asyncpg://bootlab:${POSTGRES_PASSWORD:-changeme}@postgres:5432/bootlab
+      BT_REDIS_URL: redis://redis:6379/0
+      BT_PXE_SERVER: ${PXE_SERVER}
+      BT_PXE_HTTP_PORT: ${PXE_HTTP_PORT:-8085}
+      BT_API_PORT: "8086"
+      BT_CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
+      BT_CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      BT_LAN_SUBNET: ${LAN_SUBNET:-192.168.0.0/24}
+    ports:
+      - "127.0.0.1:8086:8086"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_BASE: ""
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  pxe:
+    build: ./pxe
+    network_mode: host
+    depends_on:
+      - backend
+      - frontend
+    volumes:
+      - ./data:/data
+      - pxe-generated:/generated
+    environment:
+      PXE_SERVER: ${PXE_SERVER}
+      PXE_HTTP_PORT: ${PXE_HTTP_PORT:-8085}
+      PANEL_PORT: ${PANEL_PORT:-3006}
+      LAN_INTERFACE: ${LAN_INTERFACE:-eth0}
+      LAN_SUBNET: ${LAN_SUBNET:-192.168.0.0/24}
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  pxe-generated:

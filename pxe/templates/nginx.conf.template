@@ -1,0 +1,87 @@
+server {
+    listen ${PXE_HTTP_PORT};
+    server_name _;
+
+    client_max_body_size 0;
+    sendfile on;
+    tcp_nopush on;
+
+    access_log /var/log/nginx/pxe-access.log;
+    error_log /var/log/nginx/pxe-error.log;
+
+    location /winpe/ {
+        alias /generated/winpe/;
+    }
+
+    location /win11/ {
+        alias /generated/win11/;
+    }
+
+    location /drivers/ {
+        alias /data/drivers/;
+    }
+
+    location /activation/ {
+        alias /data/activation/;
+    }
+
+    location /redist/ {
+        alias /data/redist/;
+    }
+
+    location /branding/ {
+        alias /data/branding/;
+    }
+
+    location /profiles/ {
+        alias /data/profiles/;
+    }
+
+    location = /boot.ipxe {
+        alias /generated/tftp/boot.ipxe;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8086;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+server {
+    listen ${PANEL_PORT};
+    server_name _;
+
+    access_log /var/log/nginx/panel-access.log;
+    error_log /var/log/nginx/panel-error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8086;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
