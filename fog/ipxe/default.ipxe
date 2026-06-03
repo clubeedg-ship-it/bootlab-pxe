@@ -1,0 +1,120 @@
+#!ipxe
+# =============================================================================
+# bootlab-pxe : FOG custom boot menu  (Windows 11 Pro image deployment)
+# =============================================================================
+# Install on the FOG server as the iPXE default menu:
+#   /tftpboot/default.ipxe        (served over TFTP to PXE clients)
+# or paste the menu body into the FOG web UI:
+#   FOG Configuration -> iPXE -> Boot Menu  (Advanced)
+#
+# WORKFLOW
+#   1. Client PXE-boots and lands here -> ONE menu, version x language.
+#   2. The operator makes a SINGLE selection.
+#   3. FOG partclone-deploys the matching Sysprep golden image, then reboots
+#      into Windows. SetupComplete.cmd (baked into the image) then runs the
+#      first-boot script autonomously (GPU drivers + activation).
+#
+# FOG-SIDE PREREQUISITES (do these once on the FOG server)
+#   * Capture a Sysprep'd Windows 11 Pro master for each version/language as a
+#     FOG "Image" using EXACTLY these names (folder under /images/):
+#         win11pro-24h2-nl-NL   win11pro-24h2-en-US   ...
+#         win11pro-23h2-nl-NL   win11pro-23h2-en-US   ...
+#   * Capture them as Image Type "Single Disk - Resizable" and confirm the
+#     imgType / imgPartitionType / imgFormat values below match your FOG build
+#     (FOG Web UI -> Image -> the image -> these fields). Defaults below are the
+#     1.5.x "Single Disk Resizable, Partclone Zstd" settings.
+#   * Bake fog/scripts/SetupComplete.cmd + post-deploy.ps1 into each master at
+#     C:\Windows\Setup\Scripts\  BEFORE running sysprep /oobe /generalize.
+#
+# Replace the FOG_SERVER_IP placeholder below (the FOG installer normally
+# writes the real IP into default.ipxe for you).
+# =============================================================================
+
+set fog-ip FOG_SERVER_IP
+set fog-webroot http://${fog-ip}/fog
+set fog-ipxe ${fog-webroot}/service/ipxe
+set images-storage ${fog-ip}:/images/
+
+# --- FOG deploy image parameters (must match how the masters were captured) ---
+set osid 9                  # 9 = Windows 10/11 family in FOG
+set imgType n               # n = Single Disk - Resizable
+set imgPartitionType all
+set imgFormat 5             # 5 = Partclone Zstd
+
+:menu
+menu Omiximo bootlab-pxe  --  Deploy Windows 11 Pro
+item --gap --             ---------- Windows 11 Pro  24H2 ----------
+item w11_24h2_nlNL        24H2   Nederlands        (nl-NL)
+item w11_24h2_enUS        24H2   English (US)      (en-US)
+item w11_24h2_deDE        24H2   Deutsch           (de-DE)
+item w11_24h2_frFR        24H2   Francais          (fr-FR)
+item w11_24h2_itIT        24H2   Italiano          (it-IT)
+item --gap --             ---------- Windows 11 Pro  23H2 ----------
+item w11_23h2_nlNL        23H2   Nederlands        (nl-NL)
+item w11_23h2_enUS        23H2   English (US)      (en-US)
+item w11_23h2_deDE        23H2   Deutsch           (de-DE)
+item w11_23h2_frFR        23H2   Francais          (fr-FR)
+item w11_23h2_itIT        23H2   Italiano          (it-IT)
+item --gap --             ------------------------------------------
+item fog_menu             FOG full menu (register / capture / advanced)
+item local                Boot from local disk
+choose --default w11_24h2_nlNL --timeout 0 target && goto ${target} || goto local
+
+# --- 24H2 ---------------------------------------------------------------------
+:w11_24h2_nlNL
+set img win11pro-24h2-nl-NL
+goto deploy
+:w11_24h2_enUS
+set img win11pro-24h2-en-US
+goto deploy
+:w11_24h2_deDE
+set img win11pro-24h2-de-DE
+goto deploy
+:w11_24h2_frFR
+set img win11pro-24h2-fr-FR
+goto deploy
+:w11_24h2_itIT
+set img win11pro-24h2-it-IT
+goto deploy
+
+# --- 23H2 ---------------------------------------------------------------------
+:w11_23h2_nlNL
+set img win11pro-23h2-nl-NL
+goto deploy
+:w11_23h2_enUS
+set img win11pro-23h2-en-US
+goto deploy
+:w11_23h2_deDE
+set img win11pro-23h2-de-DE
+goto deploy
+:w11_23h2_frFR
+set img win11pro-23h2-fr-FR
+goto deploy
+:w11_23h2_itIT
+set img win11pro-23h2-it-IT
+goto deploy
+
+# --- Shared deploy routine ----------------------------------------------------
+# Boots the FOG kernel in unattended deploy mode for the selected image and
+# powers straight into Windows afterwards (shutdown=0 => reboot, not poweroff).
+:deploy
+echo
+echo Deploying image: ${img}
+echo Target disk will be ERASED. Imaging starts automatically...
+echo
+kernel ${fog-ipxe}/bzImage
+initrd ${fog-ipxe}/init.xz
+imgargs bzImage root=/dev/ram0 rw ramdisk_size=275000 ip=dhcp \
+  web=${fog-webroot}/ consoleblank=0 rootfstype=ext4 loglevel=4 \
+  mac=${net0/mac} ftp=${fog-ip} storage=${images-storage} storageip=${fog-ip} \
+  osid=${osid} img=${img} imgType=${imgType} imgPartitionType=${imgPartitionType} \
+  imgFormat=${imgFormat} type=down hostname= chkdsk=0 irqpoll shutdown=0
+boot || goto menu
+
+# --- Fall through to FOG's own menu for registration / capture / debug --------
+:fog_menu
+chain ${fog-ipxe}/boot.php##params || goto menu
+
+:local
+echo Booting from local disk...
+sanboot --no-describe --drive 0x80 || exit

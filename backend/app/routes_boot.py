@@ -46,7 +46,9 @@ def render_menu(profiles: list[BootProfile], default: str) -> str:
 
     boot_branches: list[str] = []
     for p in profiles:
-        body = Template(p.ipxe_template).safe_substitute(pxe_server=settings.pxe_server).rstrip()
+        body = Template(p.ipxe_template).safe_substitute(
+            pxe_server=settings.pxe_server, fog_server=settings.fog_server
+        ).rstrip()
         # If the template ends with `boot` or `boot ...`, replace it with cancel-fallback variant
         if body.endswith("\nboot"):
             body = body[: -len("boot")] + "boot || goto cancel"
@@ -71,7 +73,9 @@ def render_menu(profiles: list[BootProfile], default: str) -> str:
 
 
 def render_profile(profile: BootProfile) -> str:
-    body = Template(profile.ipxe_template).safe_substitute(pxe_server=settings.pxe_server)
+    body = Template(profile.ipxe_template).safe_substitute(
+        pxe_server=settings.pxe_server, fog_server=settings.fog_server
+    )
     return "\n".join([
         "#!ipxe",
         "",

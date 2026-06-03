@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     pxe_http_port: int = 8085
     api_port: int = 8086
 
+    # External FOG Project server (imaging). Empty => FOG profile chainload off.
+    fog_server: str = ""  # e.g. 192.168.0.10 (the FOG appliance IP/host)
+
     lan_subnet: str = "192.168.0.0/24"
 
     boot_intent_ttl_minutes: int = 60
