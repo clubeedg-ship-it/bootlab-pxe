@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .routes_api import router as api_router
 from .routes_boot import router as boot_router
+from .routes_fog import router as fog_router
 from .routes_stage import router as stage_router
 
 
@@ -30,6 +31,7 @@ app.add_middleware(
 
 app.include_router(api_router)
 app.include_router(boot_router, prefix="/api/v1")
+app.include_router(fog_router)
 app.include_router(stage_router)
 
 

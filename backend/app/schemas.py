@@ -131,3 +131,44 @@ class DashboardStats(BaseModel):
     sessions_today: int
     intents_pending: int
     profiles_enabled: int
+
+
+# ---------- FOG imaging ----------
+
+class FogHealth(BaseModel):
+    enabled: bool   # tokens + base configured
+    reachable: bool # FOG actually answered
+
+
+class FogImageOut(BaseModel):
+    id: int
+    name: str
+    path: str | None = None
+    os: str | None = None
+    format: str | None = None
+    size_bytes: int | None = None
+
+
+class FogTaskOut(BaseModel):
+    id: int
+    host_id: int | None = None
+    host_name: str | None = None
+    mac: str | None = None
+    image_name: str | None = None
+    percent: float | None = None
+    time_elapsed: str | None = None
+    time_remaining: str | None = None
+    data_copied: str | None = None
+    data_total: str | None = None
+    state: str | None = None
+
+
+class FogDeployIn(BaseModel):
+    mac: str
+    image_id: int
+    lang: str | None = None
+
+
+class FogDeployOut(BaseModel):
+    task_id: int
+    host_id: int

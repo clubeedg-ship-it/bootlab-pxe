@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, HardDrive, ListChecks, Monitor, Shield } from "lucide-react";
+import { Activity, HardDrive, HardDriveDownload, ListChecks, Monitor, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/", label: "Dashboard", icon: Activity },
   { href: "/machines", label: "Machines", icon: HardDrive },
   { href: "/profiles", label: "Boot Profiles", icon: Monitor },
+  { href: "/fog", label: "Imaging", icon: HardDriveDownload },
   { href: "/intents", label: "Queued Intents", icon: ListChecks },
 ];
 

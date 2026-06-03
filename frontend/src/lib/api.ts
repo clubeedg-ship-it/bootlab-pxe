@@ -146,6 +146,40 @@ export interface DashboardStats {
   profiles_enabled: number;
 }
 
+// ---- FOG imaging ----
+export interface FogHealth {
+  enabled: boolean;
+  reachable: boolean;
+}
+
+export interface FogImage {
+  id: number;
+  name: string;
+  path: string | null;
+  os: string | null;
+  format: string | null;
+  size_bytes: number | null;
+}
+
+export interface FogTask {
+  id: number;
+  host_id: number | null;
+  host_name: string | null;
+  mac: string | null;
+  image_name: string | null;
+  percent: number | null;
+  time_elapsed: string | null;
+  time_remaining: string | null;
+  data_copied: string | null;
+  data_total: string | null;
+  state: string | null;
+}
+
+export interface FogDeployResult {
+  task_id: number;
+  host_id: number;
+}
+
 // ---- API methods ----
 export const api = {
   stats: () => http<DashboardStats>("/api/v1/dashboard/stats"),
@@ -186,6 +220,17 @@ export const api = {
     if (params?.limit) qs.set("limit", String(params.limit));
     return http<BootSession[]>(`/api/v1/sessions${qs.toString() ? `?${qs}` : ""}`);
   },
+
+  // FOG imaging (backend proxies the FOG API; tokens stay server-side)
+  fogHealth: () => http<FogHealth>("/api/v1/fog/health"),
+  fogImages: () => http<FogImage[]>("/api/v1/fog/images"),
+  fogActiveTasks: () => http<FogTask[]>("/api/v1/fog/tasks/active"),
+  fogDeploy: (body: { mac: string; image_id: number; lang?: string }) =>
+    http<FogDeployResult>("/api/v1/fog/deploy", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  fogCancelTask: (id: number) => http<void>(`/api/v1/fog/tasks/${id}`, { method: "DELETE" }),
 };
 
 export const wsUrl = () => {

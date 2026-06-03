@@ -5,7 +5,7 @@ import { api, friendlyName, type Machine } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LiveFeed } from "@/components/live-feed";
-import { Activity, HardDrive, ListChecks, Monitor, Zap } from "lucide-react";
+import { Activity, HardDrive, HardDriveDownload, ListChecks, Monitor, Zap } from "lucide-react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -42,6 +42,7 @@ export default function DashboardPage() {
   });
   const machines = useQuery({ queryKey: ["machines"], queryFn: api.machines, refetchInterval: 5000 });
   const machineByMac = new Map<string, Machine>((machines.data ?? []).map((m) => [m.mac, m]));
+  const fogTasks = useQuery({ queryKey: ["fog", "tasks"], queryFn: api.fogActiveTasks, refetchInterval: 3000 });
 
   return (
     <div className="p-6 space-y-6">
@@ -52,7 +53,7 @@ export default function DashboardPage() {
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
         <StatCard icon={HardDrive} label="Machines" value={stats.data?.machines_total ?? "—"} />
         <StatCard
           icon={Zap}
@@ -68,6 +69,12 @@ export default function DashboardPage() {
           accent={stats.data?.intents_pending ? "text-amber-500" : undefined}
         />
         <StatCard icon={Monitor} label="Boot profiles" value={stats.data?.profiles_enabled ?? "—"} />
+        <StatCard
+          icon={HardDriveDownload}
+          label="Active deploys"
+          value={fogTasks.data?.length ?? "—"}
+          accent={fogTasks.data?.length ? "text-emerald-500" : undefined}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

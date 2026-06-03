@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     # External FOG Project server (imaging). Empty => FOG profile chainload off.
     fog_server: str = ""  # e.g. 192.168.0.10 (the FOG appliance IP/host)
 
+    # FOG REST API (for the panel's imaging UI). The backend proxies FOG so
+    # these tokens never reach the browser. Empty => FOG UI shows "not configured".
+    fog_api_base: str = ""    # e.g. http://192.168.0.10/fog
+    fog_api_token: str = ""   # global token: FOG Configuration -> API System
+    fog_user_token: str = ""  # per-user token: Users -> <user> -> API Settings
+
     lan_subnet: str = "192.168.0.0/24"
 
     boot_intent_ttl_minutes: int = 60

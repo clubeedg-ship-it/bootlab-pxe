@@ -13,7 +13,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
-  CheckCircle2, Cpu, HardDrive, Loader2, Monitor, Terminal,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import {
+  CheckCircle2, Cpu, HardDrive, HardDriveDownload, Loader2, Monitor, Terminal,
   XCircle, Zap, Clock, Tag, Server, MemoryStick,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -60,6 +64,14 @@ export default function MachineDetailPage({
     refetchInterval: 3000,
   });
 
+  const fogHealth = useQuery({ queryKey: ["fog", "health"], queryFn: api.fogHealth });
+  const fogImages = useQuery({ queryKey: ["fog", "images"], queryFn: api.fogImages });
+  const fogTasks = useQuery({
+    queryKey: ["fog", "tasks"],
+    queryFn: api.fogActiveTasks,
+    refetchInterval: 2000,
+  });
+
   const queueIntent = useMutation({
     mutationFn: (profile: string) =>
       api.createIntent({ mac: decodedMac, profile }),
@@ -85,6 +97,7 @@ export default function MachineDetailPage({
   const [editing, setEditing] = useState(false);
   const [hostname, setHostname] = useState("");
   const [assetTag, setAssetTag] = useState("");
+  const [fogImageId, setFogImageId] = useState("");
 
   const saveMachine = useMutation({
     mutationFn: () =>
@@ -100,6 +113,26 @@ export default function MachineDetailPage({
     },
   });
 
+  const fogDeploy = useMutation({
+    mutationFn: () => api.fogDeploy({ mac: decodedMac, image_id: Number(fogImageId) }),
+    onSuccess: () => {
+      toast.success("FOG deploy started", {
+        description: "Imaging begins on the next boot of this machine.",
+      });
+      qc.invalidateQueries({ queryKey: ["fog", "tasks"] });
+    },
+    onError: (e: Error) => toast.error(`Deploy failed: ${e.message}`),
+  });
+
+  const fogCancel = useMutation({
+    mutationFn: (id: number) => api.fogCancelTask(id),
+    onSuccess: () => {
+      toast.success("Deploy cancelled");
+      qc.invalidateQueries({ queryKey: ["fog", "tasks"] });
+    },
+    onError: (e: Error) => toast.error(`Cancel failed: ${e.message}`),
+  });
+
   if (machine.isLoading) return <div className="p-6 text-zinc-500">Loading…</div>;
   if (machine.isError) return <div className="p-6 text-red-400">Machine not found</div>;
 
@@ -110,6 +143,9 @@ export default function MachineDetailPage({
   const pending = intents.data?.filter((i) => !i.consumed_at) ?? [];
   const activeSession = sessions.data?.find((s) => !s.ended_at);
   const recentSessions = sessions.data?.slice(0, 5) ?? [];
+  const fogTaskForMac = fogTasks.data?.find(
+    (t) => t.mac && t.mac.toLowerCase() === decodedMac.toLowerCase(),
+  );
 
   const sorted = [...(profiles.data ?? [])].sort((a, b) => {
     const order: Record<string, number> = { deploy: 1, rescue: 2, inventory: 3, fallback: 4 };
@@ -218,6 +254,85 @@ export default function MachineDetailPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* ====== FOG IMAGE DEPLOY ====== */}
+      {fogHealth.data?.enabled && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <HardDriveDownload className="h-4 w-4 text-emerald-500" />
+              FOG image deploy
+            </CardTitle>
+            <p className="text-xs text-zinc-500">
+              Image this machine from a FOG golden image. The deploy starts on its next boot and reports progress here.
+            </p>
+          </CardHeader>
+          <CardContent>
+            {fogTaskForMac ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
+                    Imaging
+                    {fogTaskForMac.image_name && <Badge variant="outline">{fogTaskForMac.image_name}</Badge>}
+                  </div>
+                  <div className="text-xs text-zinc-400">
+                    {fogTaskForMac.percent != null ? `${fogTaskForMac.percent.toFixed(0)}%` : "starting…"}
+                    {fogTaskForMac.time_remaining ? ` · ${fogTaskForMac.time_remaining} left` : ""}
+                  </div>
+                </div>
+                <Progress value={fogTaskForMac.percent} />
+                <div className="flex items-center justify-between text-xs text-zinc-500">
+                  <span>
+                    {fogTaskForMac.data_copied && fogTaskForMac.data_total
+                      ? `${fogTaskForMac.data_copied} / ${fogTaskForMac.data_total}`
+                      : ""}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => fogCancel.mutate(fogTaskForMac.id)}
+                    disabled={fogCancel.isPending}
+                  >
+                    <XCircle className="mr-1 h-4 w-4" />
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Image</Label>
+                  <Select value={fogImageId} onValueChange={setFogImageId}>
+                    <SelectTrigger className="w-72">
+                      <SelectValue placeholder={fogImages.data?.length ? "Select an image…" : "No images available"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fogImages.data?.map((img) => (
+                        <SelectItem key={img.id} value={String(img.id)}>
+                          {img.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  disabled={!fogImageId || fogDeploy.isPending}
+                  onClick={() => fogDeploy.mutate()}
+                >
+                  {fogDeploy.isPending ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <HardDriveDownload className="mr-1 h-4 w-4" />
+                  )}
+                  Deploy image
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ====== COMPONENTS (from inventory boot) ====== */}
       {(m.cpu_model || m.gpu_model || m.ram_gb || m.storage_total_gb) && (
