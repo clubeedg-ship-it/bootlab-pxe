@@ -3,19 +3,21 @@ dhcp-range=${LAN_NETWORK},proxy
 enable-tftp
 tftp-root=/generated/tftp
 
-dhcp-match=set:efi-x86_64,option:client-arch,7
-dhcp-match=set:efi-x86_64,option:client-arch,9
-dhcp-match=set:bios,option:client-arch,0
+# Already-running iPXE identifies itself via option 175 — hand it the dynamic
+# HTTP boot script directly (don't chainload firmware loaders again).
 dhcp-match=set:ipxe,175
-
-# PRIMARY: UEFI clients get Microsoft-signed bootloader (Secure Boot OK)
-dhcp-boot=tag:efi-x86_64,tag:!ipxe,bootx64.efi
-
-# SECONDARY: iPXE clients get the dynamic boot script
 dhcp-boot=tag:ipxe,http://${PXE_SERVER}:${PXE_HTTP_PORT}/boot.ipxe
 
-# LEGACY: BIOS clients get iPXE
-dhcp-boot=tag:bios,tag:!ipxe,undionly.kpxe
+# Firmware PXE clients (not yet iPXE): serve via pxe-service, NOT dhcp-boot.
+# In proxyDHCP mode UEFI firmware ignores a bare dhcp-boot filename, which is
+# the usual cause of "PXE-E53: no boot filename received". pxe-service drives
+# the proper PXE boot-server discovery (port 4011) that UEFI honours.
+# CSA codes: 0 = legacy BIOS, 7 & 9 = x86-64 UEFI.
+pxe-service=tag:!ipxe,0,"bootlab BIOS",undionly.kpxe
+pxe-service=tag:!ipxe,7,"bootlab UEFI",bootx64.efi
+pxe-service=tag:!ipxe,9,"bootlab UEFI",bootx64.efi
+# Boot the matched entry immediately — no menu, no keypress.
+pxe-prompt="bootlab",0
 
 port=0
 log-facility=/var/log/dnsmasq-pxe.log

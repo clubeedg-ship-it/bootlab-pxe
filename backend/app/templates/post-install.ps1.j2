@@ -29,7 +29,7 @@ Write-Log "=== Post-install started (lang=$LANG) ==="
 Report-Stage "post_install_started"
 
 # --- 1. Language + regional ---
-Write-Log "[1/6] Configuring language: $LANG"
+Write-Log "[1/5] Configuring language: $LANG"
 
 Set-WinSystemLocale $LANG
 Set-WinHomeLocation -GeoId {{ locale.geo_id }}
@@ -46,7 +46,7 @@ Report-Stage "locale_configured"
 Write-Log "  Done: $LANG / {{ locale.timezone }}"
 
 # --- 2. VC++ Runtimes ---
-Write-Log "[2/6] Installing VC++ runtimes..."
+Write-Log "[2/5] Installing VC++ runtimes..."
 foreach ($arch in @("x64", "x86")) {
     $exe = "$WORK_DIR\VC_redist.$arch.exe"
     if (Download-File "$PXE_BASE/redist/VC_redist.$arch.exe" $exe) {
@@ -58,7 +58,7 @@ foreach ($arch in @("x64", "x86")) {
 Report-Stage "vcredist_installed"
 
 # --- 3. NVIDIA GPU driver ---
-Write-Log "[3/6] Checking for NVIDIA GPU..."
+Write-Log "[3/5] Checking for NVIDIA GPU..."
 $gpu = Get-WmiObject Win32_VideoController | Where-Object { $_.Name -match "NVIDIA" }
 
 if ($gpu) {
@@ -75,21 +75,8 @@ if ($gpu) {
 }
 Report-Stage "drivers_installed"
 
-# --- 4. Activation (MAS HWID) ---
-Write-Log "[4/6] Activating Windows..."
-$masScript = "$WORK_DIR\MAS_AIO.cmd"
-if (Download-File "$PXE_BASE/activation/MAS_AIO.cmd" $masScript) {
-    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c","`"$masScript`" /HWID /S" -Wait -PassThru -WindowStyle Hidden
-    Write-Log "  MAS exit: $($proc.ExitCode)"
-    Start-Sleep -Seconds 5
-    $status = cscript //nologo C:\Windows\System32\slmgr.vbs /xpr 2>&1 | Out-String
-    Write-Log "  Activation: $($status.Trim())"
-    Remove-Item $masScript -Force -ErrorAction SilentlyContinue
-}
-Report-Stage "activation_done"
-
-# --- 5. Branding + gaming optimizations ---
-Write-Log "[5/6] Applying optimizations..."
+# --- 4. Branding + gaming optimizations ---
+Write-Log "[4/5] Applying optimizations..."
 
 $screensaverImg = "C:\Windows\Web\Wallpaper\screensaver-gaming.jpg"
 if (Download-File "$PXE_BASE/branding/screensaver-gaming.jpg" $screensaverImg) {
@@ -117,8 +104,8 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection
 
 Report-Stage "optimizations_applied"
 
-# --- 6. Cleanup ---
-Write-Log "[6/6] Cleaning up..."
+# --- 5. Cleanup ---
+Write-Log "[5/5] Cleaning up..."
 Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "DefaultPassword" -ErrorAction SilentlyContinue
 

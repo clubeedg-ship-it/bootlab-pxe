@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import oui
 from .config import settings
-from .db import BootIntent, BootProfile, BootSession, Machine, get_db
+from .db import BootIntent, BootProfile, BootSession, Machine, SetupScript, get_db
 from .events import bus
 from .locales import get_locale, LOCALES
 
@@ -286,3 +286,83 @@ async def dynamic_postinstall(
         pxe_http_port=settings.pxe_http_port,
     )
     return Response(content=script, media_type="text/plain")
+
+
+# ---- Assembled first-boot script for the FOG path ----
+# Served to a freshly-imaged machine by the baked SetupComplete.cmd bootstrap.
+# Concatenates the operator's enabled setup_scripts (managed from the panel)
+# into one PowerShell document that runs once, as SYSTEM, with no logon.
+
+_FIRSTBOOT_HEADER = """#Requires -RunAsAdministrator
+$ErrorActionPreference = "Continue"
+$PXE_SERVER = "{pxe_server}"
+$PXE_BASE   = "http://{pxe_server}:{pxe_http_port}"
+$WorkDir    = "C:\\PXE"
+$Log        = Join-Path $WorkDir "firstboot.log"
+New-Item -Path $WorkDir -ItemType Directory -Force | Out-Null
+
+function Write-Log {{ param([string]$m)
+    ("{{0}} - {{1}}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m) | Tee-Object -FilePath $Log -Append
+}}
+
+function Report-Stage {{ param([string]$Stage)
+    try {{
+        $mac = (Get-CimInstance Win32_NetworkAdapterConfiguration |
+                Where-Object {{ $_.IPEnabled -and $_.MACAddress }} |
+                Select-Object -First 1).MACAddress
+        if ($mac) {{
+            $mac = $mac.Replace(":", "-")
+            $body = @{{ stage = $Stage }} | ConvertTo-Json
+            Invoke-WebRequest -Uri "$PXE_BASE/api/v1/machines/$mac/stage" -Method POST `
+                -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 | Out-Null
+        }}
+    }} catch {{}}
+}}
+
+Write-Log "=== firstboot started (server $PXE_SERVER) ==="
+Report-Stage "firstboot_started"
+"""
+
+_FIRSTBOOT_FOOTER = """
+Write-Log "=== firstboot completed ==="
+Report-Stage "firstboot_done"
+exit 0
+"""
+
+
+@router.get("/setup/firstboot.ps1")
+async def firstboot_script(db: AsyncSession = Depends(get_db)) -> Response:
+    rows = list((await db.execute(
+        select(SetupScript)
+        .where(SetupScript.enabled.is_(True))
+        .order_by(SetupScript.run_order, SetupScript.name)
+    )).scalars())
+
+    parts: list[str] = [
+        _FIRSTBOOT_HEADER.format(
+            pxe_server=settings.pxe_server,
+            pxe_http_port=settings.pxe_http_port,
+        )
+    ]
+
+    for s in rows:
+        parts.append(f'\nWrite-Log "--- running {s.name} ({s.language}) ---"')
+        parts.append(f'Report-Stage "script:{s.name}"')
+        parts.append("try {")
+        if s.language == "batch":
+            # Write the batch body to a file and invoke it via cmd /c.
+            safe = s.name.replace('"', "").replace("'", "")
+            cmd_path = f"$WorkDir\\{safe}.cmd"
+            parts.append(f'    $cmd = "{cmd_path}"')
+            parts.append("    @'")
+            parts.append(s.content.rstrip("\n"))
+            parts.append("'@ | Set-Content -Path $cmd -Encoding ASCII")
+            parts.append('    & cmd.exe /c $cmd')
+        else:
+            parts.append(s.content.rstrip("\n"))
+        parts.append("} catch {")
+        parts.append(f'    Write-Log "  ERROR in {s.name}: $($_.Exception.Message)"')
+        parts.append("}")
+
+    parts.append(_FIRSTBOOT_FOOTER)
+    return Response(content="\n".join(parts), media_type="text/plain")

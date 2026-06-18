@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, HardDrive, HardDriveDownload, ListChecks, Monitor, Shield } from "lucide-react";
+import { Activity, HardDrive, HardDriveDownload, ListChecks, Monitor, Shield, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -10,6 +10,7 @@ const links = [
   { href: "/machines", label: "Machines", icon: HardDrive },
   { href: "/profiles", label: "Boot Profiles", icon: Monitor },
   { href: "/fog", label: "Imaging", icon: HardDriveDownload },
+  { href: "/setup-scripts", label: "Setup Scripts", icon: Terminal },
   { href: "/intents", label: "Queued Intents", icon: ListChecks },
 ];
 

@@ -138,6 +138,18 @@ export interface BootSession {
   bytes_served: number;
 }
 
+export interface SetupScript {
+  id: number;
+  name: string;
+  description: string | null;
+  language: "powershell" | "batch";
+  content: string;
+  run_order: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DashboardStats {
   machines_total: number;
   sessions_active: number;
@@ -193,6 +205,30 @@ export const api = {
     }),
 
   profiles: () => http<BootProfile[]>("/api/v1/profiles"),
+
+  setupScripts: () => http<SetupScript[]>("/api/v1/setup-scripts"),
+  createSetupScript: (body: {
+    name: string;
+    description?: string | null;
+    language?: "powershell" | "batch";
+    content?: string;
+    run_order?: number;
+    enabled?: boolean;
+  }) =>
+    http<SetupScript>("/api/v1/setup-scripts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateSetupScript: (
+    id: number,
+    patch: Partial<Pick<SetupScript, "name" | "description" | "language" | "content" | "run_order" | "enabled">>,
+  ) =>
+    http<SetupScript>(`/api/v1/setup-scripts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteSetupScript: (id: number) =>
+    http<void>(`/api/v1/setup-scripts/${id}`, { method: "DELETE" }),
 
   intents: (params?: { mac?: string; pending_only?: boolean }) => {
     const qs = new URLSearchParams();

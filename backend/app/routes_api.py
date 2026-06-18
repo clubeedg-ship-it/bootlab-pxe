@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import operator_identity, require_trusted_network
 from .config import settings
-from .db import AuditLog, BootIntent, BootProfile, BootSession, Machine, get_db
+from .db import AuditLog, BootIntent, BootProfile, BootSession, Machine, SetupScript, get_db
 from .events import bus
 from .schemas import (
     BootIntentCreate,
@@ -18,6 +18,9 @@ from .schemas import (
     FingerprintIn,
     MachineOut,
     MachineUpdate,
+    SetupScriptCreate,
+    SetupScriptOut,
+    SetupScriptUpdate,
 )
 
 
@@ -137,6 +140,83 @@ async def submit_fingerprint(
 async def list_profiles(db: AsyncSession = Depends(get_db)) -> list[BootProfileOut]:
     rows = (await db.execute(select(BootProfile).order_by(BootProfile.name))).scalars()
     return [BootProfileOut.model_validate(p) for p in rows]
+
+
+# ---------- Setup scripts (post-boot first-run scripts) ----------
+
+@router.get("/setup-scripts", response_model=list[SetupScriptOut])
+async def list_setup_scripts(db: AsyncSession = Depends(get_db)) -> list[SetupScriptOut]:
+    rows = (await db.execute(
+        select(SetupScript).order_by(SetupScript.run_order, SetupScript.name)
+    )).scalars()
+    return [SetupScriptOut.model_validate(s) for s in rows]
+
+
+@router.post("/setup-scripts", response_model=SetupScriptOut, status_code=201)
+async def create_setup_script(
+    body: SetupScriptCreate, request: Request, db: AsyncSession = Depends(get_db)
+) -> SetupScriptOut:
+    existing = await db.scalar(select(SetupScript).where(SetupScript.name == body.name))
+    if existing:
+        raise HTTPException(409, f"A setup script named '{body.name}' already exists")
+    s = SetupScript(**body.model_dump())
+    db.add(s)
+    db.add(AuditLog(
+        operator=operator_from(request),
+        action="script.create",
+        target_type="setup_script",
+        target_id=body.name,
+        details={"language": body.language, "enabled": body.enabled},
+    ))
+    await db.commit()
+    await db.refresh(s)
+    return SetupScriptOut.model_validate(s)
+
+
+@router.patch("/setup-scripts/{script_id}", response_model=SetupScriptOut)
+async def update_setup_script(
+    script_id: int, update: SetupScriptUpdate, request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> SetupScriptOut:
+    s = await db.get(SetupScript, script_id)
+    if not s:
+        raise HTTPException(404, "Setup script not found")
+    fields = update.model_dump(exclude_unset=True)
+    if "name" in fields and fields["name"] != s.name:
+        clash = await db.scalar(select(SetupScript).where(SetupScript.name == fields["name"]))
+        if clash:
+            raise HTTPException(409, f"A setup script named '{fields['name']}' already exists")
+    for k, v in fields.items():
+        setattr(s, k, v)
+    s.updated_at = datetime.now(timezone.utc)
+    db.add(AuditLog(
+        operator=operator_from(request),
+        action="script.update",
+        target_type="setup_script",
+        target_id=s.name,
+        details={"fields": sorted(fields.keys())},
+    ))
+    await db.commit()
+    await db.refresh(s)
+    return SetupScriptOut.model_validate(s)
+
+
+@router.delete("/setup-scripts/{script_id}", status_code=204)
+async def delete_setup_script(
+    script_id: int, request: Request, db: AsyncSession = Depends(get_db)
+) -> None:
+    s = await db.get(SetupScript, script_id)
+    if not s:
+        raise HTTPException(404, "Setup script not found")
+    name = s.name
+    await db.delete(s)
+    db.add(AuditLog(
+        operator=operator_from(request),
+        action="script.delete",
+        target_type="setup_script",
+        target_id=name,
+    ))
+    await db.commit()
 
 
 # ---------- Boot intents ----------

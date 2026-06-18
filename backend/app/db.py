@@ -64,6 +64,20 @@ class BootProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SetupScript(Base):
+    __tablename__ = "setup_scripts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str] = mapped_column(String, nullable=False, default="powershell")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    run_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class BootIntent(Base):
     __tablename__ = "boot_intents"
 

@@ -125,6 +125,52 @@ class BootSessionOut(BaseModel):
         return _ip_to_str(v)
 
 
+class SetupScriptOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str | None
+    language: str
+    content: str
+    run_order: int
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SetupScriptCreate(BaseModel):
+    name: str
+    description: str | None = None
+    language: str = "powershell"
+    content: str = ""
+    run_order: int = 100
+    enabled: bool = True
+
+    @field_validator("language")
+    @classmethod
+    def _lang_ok(cls, v: str) -> str:
+        if v not in ("powershell", "batch"):
+            raise ValueError("language must be 'powershell' or 'batch'")
+        return v
+
+
+class SetupScriptUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    language: str | None = None
+    content: str | None = None
+    run_order: int | None = None
+    enabled: bool | None = None
+
+    @field_validator("language")
+    @classmethod
+    def _lang_ok(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("powershell", "batch"):
+            raise ValueError("language must be 'powershell' or 'batch'")
+        return v
+
+
 class DashboardStats(BaseModel):
     machines_total: int
     sessions_active: int

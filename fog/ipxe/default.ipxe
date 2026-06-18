@@ -12,7 +12,7 @@
 #   2. The operator makes a SINGLE selection.
 #   3. FOG partclone-deploys the matching Sysprep golden image, then reboots
 #      into Windows. SetupComplete.cmd (baked into the image) then runs the
-#      first-boot script autonomously (GPU drivers + activation).
+#      first-boot setup autonomously (GPU drivers, etc.). No activation step.
 #
 # FOG-SIDE PREREQUISITES (do these once on the FOG server)
 #   * Capture a Sysprep'd Windows 11 Pro master for each version/language as a
@@ -23,8 +23,14 @@
 #     imgType / imgPartitionType / imgFormat values below match your FOG build
 #     (FOG Web UI -> Image -> the image -> these fields). Defaults below are the
 #     1.5.x "Single Disk Resizable, Partclone Zstd" settings.
-#   * Bake fog/scripts/SetupComplete.cmd + post-deploy.ps1 into each master at
-#     C:\Windows\Setup\Scripts\  BEFORE running sysprep /oobe /generalize.
+#   * Bake fog/scripts/SetupComplete.cmd into each master at
+#     C:\Windows\Setup\Scripts\  BEFORE running sysprep /oobe /generalize, and
+#     set BOOTLAB_SERVER inside it to the bootlab box's LAN IP. That bootstrap
+#     downloads the current first-boot script from bootlab on every deploy, so
+#     editing the setup later (panel -> "Setup Scripts") needs NO re-capture.
+#   * Host driver binaries on the BOOTLAB box under ./data/drivers/ (served at
+#     http://<bootlab>:8085/drivers/). The seeded GPU script fetches the NVIDIA
+#     driver from there -- the whole RTX 3050+ fleet uses one package.
 #
 # Replace the FOG_SERVER_IP placeholder below (the FOG installer normally
 # writes the real IP into default.ipxe for you).
